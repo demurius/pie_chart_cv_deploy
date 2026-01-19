@@ -1,0 +1,16 @@
+opencv-python-headless
+numpy
+scikit-learn
+scipy
+fastapi
+uvicorn
+pydantic
+requests
+python-multipart
+google-auth
+google-auth-oauthlib
+google-auth-httplib2
+google-api-python-client
+sqlalchemy
+google-genai
+Pillow
