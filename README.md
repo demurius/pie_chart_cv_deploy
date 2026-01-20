@@ -85,7 +85,7 @@ To automate fetching, processing, and syncing new results:
 - `/authorize` - Start OAuth flow
 - `/fetch-emails` - Fetch emails and attachments
 - `/process-emails` - Process unprocessed emails
-- `/mbti-results` - Get/save results (JSON, CSV, or Google Sheets)
+- `/mbti-results` - Save results to Google Sheets
 - `/sync-emails` - Fetch, process, and sync in one step
 - `/status` - Check OAuth status
 - `/` - Check health
