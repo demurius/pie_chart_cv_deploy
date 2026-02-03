@@ -1167,15 +1167,20 @@ def process_single_email(email: Email, gemini_api_key: str, skip_mbti: bool = Fa
             
             print(f"[Process] Trying OpenCV on image {img_data['index']}: {img_data['filename']}")
             
-            try:
-                # Decode base64 to OpenCV image
+            try:                                
                 image_bytes = base64.b64decode(img_data['base64'])
                 image_array = np.frombuffer(image_bytes, dtype=np.uint8)
                 img = cv2.imdecode(image_array, cv2.IMREAD_COLOR)
-                
                 if img is None:
-                    print(f"[Process] Failed to decode image {img_data['index']}")
-                    continue
+                    print(f"[Process] Failed to decode image {img_data['index']}, trying to load from file...")
+                    if not att['file_path'] or not os.path.exists(att['file_path']):
+                        print(f"[Process] Image file not found: {att.get('file_path', 'None')}")
+                        continue
+
+                    img = cv2.imread(att['file_path'])
+                    if img is None:
+                        print(f"[Process] Failed to load image from {att['file_path']}")
+                        continue
                 
                 # Analyze pie chart using method with colors
                 result = analyze_pie_chart_with_colors(

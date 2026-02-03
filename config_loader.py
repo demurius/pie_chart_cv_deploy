@@ -1,43 +1,44 @@
 """
 Configuration loader for the application.
-Loads configuration from config.json file with fallback to environment variables.
+Loads configuration from .env file and environment variables.
 """
-import json
 import os
 from typing import Dict, Any, Optional
+from dotenv import load_dotenv
+
+# Load .env file once at module import time
+_env_loaded = False
+
+def _ensure_env_loaded():
+    """Ensure .env file is loaded only once."""
+    global _env_loaded
+    if not _env_loaded:
+        if os.path.exists(".env"):
+            try:
+                load_dotenv(".env")
+                _env_loaded = True
+            except Exception as e:
+                print(f"[Config] Warning: Failed to load .env file: {e}")
+        _env_loaded = True
 
 
 class Config:        
     """Application configuration manager."""
     
-    def __init__(self, config_file: str = None):
+    def __init__(self, env_file: str = None):
         """
-        Initialize configuration from file.
+        Initialize configuration from .env file.
         
         Args:
-            config_file: Path to config.json file (default: CONFIG_FILE env var or ./config.json)
+            env_file: Path to .env file (default: .env)
         """
-        self.config_file = config_file or os.getenv("CONFIG_FILE", "config.json")
-        self._config = {}
-        self._load_config()
-    
-    def _load_config(self):
-        """Load configuration from JSON file."""
-        if os.path.exists(self.config_file):
-            try:
-                with open(self.config_file, 'r') as f:
-                    self._config = json.load(f)
-                print(f"[Config] Loaded configuration from {self.config_file}")
-            except Exception as e:
-                print(f"[Config] Warning: Failed to load config file: {e}")
-                self._config = {}
-        else:
-            print(f"[Config] Warning: Config file {self.config_file} not found. Using environment variables only.")
-            self._config = {}
+        self.env_file = env_file or ".env"
+        # Ensure .env is loaded once at module level
+        _ensure_env_loaded()
     
     def get(self, key: str, default: Any = None, required: bool = False) -> Any:
         """
-        Get configuration value.
+        Get configuration value from environment variables.
         
         Args:
             key: Configuration key
@@ -47,21 +48,17 @@ class Config:
         Returns:
             Configuration value
         """
-        # Try config file first
-        value = self._config.get(key)
+        # Get from environment variable (uppercase with underscores)
+        env_key = key.upper().replace("-", "_")
+        value = os.getenv(env_key)
         
-        # Fall back to environment variable (uppercase with underscores)
-        if value is None:
-            env_key = key.upper().replace("-", "_")
-            value = os.getenv(env_key)
-        
-        # Use default if still None
+        # Use default if None
         if value is None:
             value = default
         
         # Raise error if required and still None
         if required and value is None:
-            raise ValueError(f"Required configuration key '{key}' not found in config file or environment")
+            raise ValueError(f"Required configuration key '{key}' not found in environment variables")
         
         return value
     
@@ -146,7 +143,7 @@ class Config:
         
         # Check required fields
         if not self.user_id:
-            errors.append("user_id is required in config.json")
+            errors.append("USER_ID is required in .env file or environment variables")
         
         # Warn about optional fields
         if not self.gemini_api_key:
@@ -170,8 +167,8 @@ def get_config() -> Config:
     return _config_instance
 
 
-def init_config(config_file: str = None) -> Config:
+def init_config(env_file: str = None) -> Config:
     """Initialize the global configuration instance."""
     global _config_instance
-    _config_instance = Config(config_file)
+    _config_instance = Config(env_file)
     return _config_instance
