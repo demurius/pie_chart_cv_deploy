@@ -1954,7 +1954,6 @@ async def get_results(
             mbti_reports_dir.mkdir(parents=True, exist_ok=True)
         
         results = get_mbti_results(user_id=user_id)
-        #results = get_mbti_results(user_id="thomascreedon@safeguardarmour.co.uk")
         
         # Handle the structure where results is a list of (MBTIResult, Email) tuples
         mbti_results = []
