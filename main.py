@@ -147,6 +147,38 @@ SCOPES = [
 ]
 CLIENT_SECRETS_FILE = os.getenv("GOOGLE_CREDENTIALS_FILE", "credentials.json")
 
+# Check if we should use credentials from environment variable
+_credentials_json_content = None
+if app_config and app_config.google_credentials_json:
+    _credentials_json_content = app_config.google_credentials_json
+    # Create a temporary file for the credentials if provided via environment
+    import tempfile
+    import json
+    import atexit
+    try:
+        # Validate that it's valid JSON
+        credentials_data = json.loads(_credentials_json_content)
+        # Create temporary file
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as temp_file:
+            json.dump(credentials_data, temp_file)
+            CLIENT_SECRETS_FILE = temp_file.name
+        
+        # Register cleanup function to delete temp file on exit
+        def cleanup_temp_credentials():
+            try:
+                os.unlink(CLIENT_SECRETS_FILE)
+            except:
+                pass
+        atexit.register(cleanup_temp_credentials)
+        
+        print(f"[Config] Using Google credentials from environment variable")
+    except json.JSONDecodeError as e:
+        print(f"[Config] Warning: Invalid JSON in GOOGLE_CREDENTIALS_JSON: {e}")
+        print(f"[Config] Falling back to credentials file: {CLIENT_SECRETS_FILE}")
+    except Exception as e:
+        print(f"[Config] Warning: Failed to process GOOGLE_CREDENTIALS_JSON: {e}")
+        print(f"[Config] Falling back to credentials file: {CLIENT_SECRETS_FILE}")
+
 # Get redirect URI from config or environment
 if app_config:
     REDIRECT_URI = app_config.get("oauth_redirect_uri", os.getenv("OAUTH_REDIRECT_URI", "http://localhost:8080/oauth2callback"))
@@ -1959,6 +1991,7 @@ async def get_results(
             mbti_reports_dir.mkdir(parents=True, exist_ok=True)
         
         results = get_mbti_results(user_id=user_id)
+        #results = get_mbti_results(user_id="thomascreedon@safeguardarmour.co.uk")
         
         # Handle the structure where results is a list of (MBTIResult, Email) tuples
         mbti_results = []

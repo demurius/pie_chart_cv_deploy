@@ -132,6 +132,11 @@ class Config:
         """Get debug mode flag (from config or DEBUG_MODE env var)."""
         return self.get_bool("debug_mode", False)
         
+    @property
+    def google_credentials_json(self) -> Optional[str]:
+        """Get Google credentials JSON content from environment variable."""
+        return self.get("google_credentials_json")
+        
     def validate(self) -> tuple[bool, list[str]]:
         """
         Validate configuration.
