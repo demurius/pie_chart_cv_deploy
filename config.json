@@ -1,9 +1,0 @@
-{
-  "user_id": "<YOUR_EMAIL_ADDRESS>",
-  "google_sheet_id": "<YOUR_GOOGLE_SHEET_ID>",
-  "gemini_api_key": "<YOUR_GEMINI_API_KEY>",
-  "subject_filter": "Your recent application for",  
-  "oauth_redirect_uri": "http://localhost:8888/oauth2callback",
-  "port": 8888,
-  "max_workers": 8
-}
