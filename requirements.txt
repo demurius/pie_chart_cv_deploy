@@ -13,4 +13,4 @@ google-auth-httplib2
 google-api-python-client
 sqlalchemy
 google-genai
-Pillow
+python-dotenv

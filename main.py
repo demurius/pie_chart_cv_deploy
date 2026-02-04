@@ -1,6 +1,7 @@
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Depends, Header
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, RedirectResponse, JSONResponse
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, HttpUrl
 import cv2
 import numpy as np
@@ -14,6 +15,7 @@ import json
 import csv
 import re
 import warnings
+import secrets
 
 # Suppress runtime warnings
 warnings.filterwarnings('ignore', category=RuntimeWarning)
@@ -147,6 +149,38 @@ SCOPES = [
 ]
 CLIENT_SECRETS_FILE = os.getenv("GOOGLE_CREDENTIALS_FILE", "credentials.json")
 
+# Check if we should use credentials from environment variable
+_credentials_json_content = None
+if app_config and app_config.google_credentials_json:
+    _credentials_json_content = app_config.google_credentials_json
+    # Create a temporary file for the credentials if provided via environment
+    import tempfile
+    import json
+    import atexit
+    try:
+        # Validate that it's valid JSON
+        credentials_data = json.loads(_credentials_json_content)
+        # Create temporary file
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as temp_file:
+            json.dump(credentials_data, temp_file)
+            CLIENT_SECRETS_FILE = temp_file.name
+        
+        # Register cleanup function to delete temp file on exit
+        def cleanup_temp_credentials():
+            try:
+                os.unlink(CLIENT_SECRETS_FILE)
+            except:
+                pass
+        atexit.register(cleanup_temp_credentials)
+        
+        print(f"[Config] Using Google credentials from environment variable")
+    except json.JSONDecodeError as e:
+        print(f"[Config] Warning: Invalid JSON in GOOGLE_CREDENTIALS_JSON: {e}")
+        print(f"[Config] Falling back to credentials file: {CLIENT_SECRETS_FILE}")
+    except Exception as e:
+        print(f"[Config] Warning: Failed to process GOOGLE_CREDENTIALS_JSON: {e}")
+        print(f"[Config] Falling back to credentials file: {CLIENT_SECRETS_FILE}")
+
 # Get redirect URI from config or environment
 if app_config:
     REDIRECT_URI = app_config.get("oauth_redirect_uri", os.getenv("OAUTH_REDIRECT_URI", "http://localhost:8080/oauth2callback"))
@@ -188,6 +222,46 @@ def get_user_id_or_fallback(provided_user_id: Optional[str]) -> str:
         raise HTTPException(status_code=400, detail=error_msg)
     
     return config_user_id
+
+
+# Security
+security = HTTPBearer(auto_error=False)
+
+
+async def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    """
+    Verify API token from Authorization header.
+    
+    Args:
+        credentials: HTTP Bearer token credentials
+        
+    Returns:
+        True if token is valid
+        
+    Raises:
+        HTTPException: If token is missing or invalid
+    """
+    # If no API token is configured, skip authentication
+    if app_config is None or not app_config.api_token:
+        return True
+    
+    # Check if credentials were provided
+    if credentials is None:
+        raise HTTPException(
+            status_code=401,
+            detail="Missing authentication token. Please provide a valid API token in the Authorization header.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    # Verify the token using constant-time comparison to prevent timing attacks
+    if not secrets.compare_digest(credentials.credentials, app_config.api_token):
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid authentication token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    return True
 
 
 class ImageRequest(BaseModel):
@@ -377,7 +451,8 @@ async def oauth2callback(request: Request):
 async def fetch_emails(
     user_id: Optional[str] = None,
     start_page: int = 1,
-    start_date: Optional[str] = "auto"
+    start_date: Optional[str] = "auto",
+    _: bool = Depends(verify_token)
 ):
     """
     Fetch ALL emails with specific subject and at least 2 image attachments, save to database.
@@ -919,7 +994,7 @@ async def root():
 
 
 @app.get("/config")
-async def check_config():
+async def check_config(_: bool = Depends(verify_token)):
     """
     Check configuration status and validation.
     
@@ -949,7 +1024,7 @@ async def check_config():
 
 
 @app.get("/status")
-async def check_status(user_id: Optional[str] = None):
+async def check_status(user_id: Optional[str] = None, _: bool = Depends(verify_token)):
     """
     Check OAuth status for a user.
 
@@ -973,12 +1048,12 @@ async def check_status(user_id: Optional[str] = None):
         return {
             "authorized": False,
             "user_id": user_id,
-            "message": f"User not authorized. Please visit /authorize?user_id={user_id}",
+            "message": f"User not authorized. Please visit /authorize",
         }
 
 
 @app.delete("/logout")
-async def logout_user(user_id: Optional[str] = None):
+async def logout_user(user_id: Optional[str] = None, _: bool = Depends(verify_token)):
     """
     Remove stored credentials for a user.
 
@@ -1004,7 +1079,7 @@ async def logout_user(user_id: Optional[str] = None):
 
 
 @app.get("/test-image")
-async def get_test_image():
+async def get_test_image(_: bool = Depends(verify_token)):
     """
     Serve a test pie chart image for download.
 
@@ -1167,15 +1242,20 @@ def process_single_email(email: Email, gemini_api_key: str, skip_mbti: bool = Fa
             
             print(f"[Process] Trying OpenCV on image {img_data['index']}: {img_data['filename']}")
             
-            try:
-                # Decode base64 to OpenCV image
+            try:                                
                 image_bytes = base64.b64decode(img_data['base64'])
                 image_array = np.frombuffer(image_bytes, dtype=np.uint8)
                 img = cv2.imdecode(image_array, cv2.IMREAD_COLOR)
-                
                 if img is None:
-                    print(f"[Process] Failed to decode image {img_data['index']}")
-                    continue
+                    print(f"[Process] Failed to decode image {img_data['index']}, trying to load from file...")
+                    if not att['file_path'] or not os.path.exists(att['file_path']):
+                        print(f"[Process] Image file not found: {att.get('file_path', 'None')}")
+                        continue
+
+                    img = cv2.imread(att['file_path'])
+                    if img is None:
+                        print(f"[Process] Failed to load image from {att['file_path']}")
+                        continue
                 
                 # Analyze pie chart using method with colors
                 result = analyze_pie_chart_with_colors(
@@ -1627,7 +1707,8 @@ def overwrite_sheet_data(service, spreadsheet_id: str, rows_data: List[Dict[str,
 async def sync_emails(
     user_id: Optional[str] = None,
     start_date: Optional[str] = "auto",
-    spreadsheet_id: Optional[str] = None
+    spreadsheet_id: Optional[str] = None,
+    _: bool = Depends(verify_token)
 ):
     """
     Sync new emails from Gmail (using auto date filter) and process them for MBTI data in one operation.
@@ -1820,7 +1901,8 @@ async def sync_emails(
 @app.get("/process-emails")
 async def process_emails(
     user_id: Optional[str] = None,
-    batch_size: Optional[int] = 10000
+    batch_size: Optional[int] = 10000,
+    _: bool = Depends(verify_token)
 ):
     """
     Process unprocessed emails to extract MBTI and pie chart data.
@@ -1928,7 +2010,8 @@ async def get_results(
     user_id: Optional[str] = None,
     format: Optional[str] = "json",
     save_csv: Optional[bool] = False,
-    spreadsheet_id: Optional[str] = None
+    spreadsheet_id: Optional[str] = None,
+    _: bool = Depends(verify_token)
 ):
     """
     Get MBTI processing results.
