@@ -18,6 +18,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
 COPY *.py .
+COPY colors/ ./colors/
 
 # Create directories for persistent data (Railway Volumes should map here)
 RUN mkdir -p /data/attachments
