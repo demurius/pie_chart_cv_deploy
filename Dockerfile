@@ -14,7 +14,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY *.py .
 COPY colors/ ./colors/
-COPY emails.db ./emails.db
+# COPY emails.db ./emails.db
 
 RUN mkdir -p /data/attachments
 
