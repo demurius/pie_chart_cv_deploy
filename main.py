@@ -124,7 +124,7 @@ def refresh_credentials(user_id: str, credentials: Credentials) -> Credentials:
         print(f"[OAuth] Failed to refresh token: {str(e)}")
         raise HTTPException(
             status_code=401,
-            detail=f"Token refresh failed. Please re-authorize at /authorize?user_id={user_id}",
+            detail=f"Token refresh failed. Please re-authorize at /authorize",
         )
 
 
@@ -505,7 +505,7 @@ async def fetch_emails(
     if not creds_data:
         raise HTTPException(
             status_code=401,
-            detail=f"User '{user_id}' not authenticated. Please complete OAuth flow first at /authorize?user_id={user_id}",
+            detail=f"User '{user_id}' not authenticated. Please complete OAuth flow first at /authorize",
         )
 
     try:
@@ -595,7 +595,7 @@ async def fetch_emails(
                 if skip_response.status_code == 401:
                     raise HTTPException(
                         status_code=401,
-                        detail=f"Gmail API returned 401 Unauthorized. Token may be invalid or have wrong scopes. Please re-authorize at /authorize?user_id={user_id}",
+                        detail=f"Gmail API returned 401 Unauthorized. Token may be invalid or have wrong scopes. Please re-authorize at /authorize",
                     )
                 
                 skip_response.raise_for_status()
@@ -626,7 +626,7 @@ async def fetch_emails(
             if search_response.status_code == 401:
                 raise HTTPException(
                     status_code=401,
-                    detail=f"Gmail API returned 401 Unauthorized. Token may be invalid or have wrong scopes. Please re-authorize at /authorize?user_id={user_id}",
+                    detail=f"Gmail API returned 401 Unauthorized. Token may be invalid or have wrong scopes. Please re-authorize at /authorize",
                 )
 
             search_response.raise_for_status()
@@ -902,7 +902,7 @@ async def fetch_emails(
         ):
             raise HTTPException(
                 status_code=403,
-                detail=f"Insufficient permissions. Please re-authorize at /authorize?user_id={user_id} to grant required scopes.",
+                detail=f"Insufficient permissions. Please re-authorize at /authorize to grant required scopes.",
             )
 
         raise HTTPException(
@@ -1096,6 +1096,53 @@ async def get_test_image(_: bool = Depends(verify_token)):
     raise HTTPException(
         status_code=404,
         detail="No test image available. Please place a pie chart image in the server directory.",
+    )
+
+
+@app.get("/download")
+async def download_database(_: bool = Depends(verify_token)):
+    """
+    Download the emails database file.
+    
+    This is a secured endpoint that requires API token authentication.
+    Returns the emails.db file for backup or analysis purposes.
+    
+    Security:
+    - Requires valid API token in Authorization header
+    - Only returns the database if it exists
+    
+    Returns:
+    - emails.db file as attachment
+    """
+    # Get database path from environment or default
+    database_path = os.getenv("DATABASE_PATH", "./emails.db")
+    
+    # Check if database file exists
+    if not os.path.exists(database_path):
+        raise HTTPException(
+            status_code=404,
+            detail="Database file not found. No emails have been processed yet."
+        )
+    
+    # Check if file is readable
+    if not os.access(database_path, os.R_OK):
+        raise HTTPException(
+            status_code=403,
+            detail="Database file is not readable. Permission denied."
+        )
+    
+    # Get file size for logging
+    file_size = os.path.getsize(database_path)
+    print(f"[Download] Database download requested - file size: {file_size} bytes")
+    
+    # Return file with appropriate headers
+    return FileResponse(
+        database_path,
+        media_type="application/octet-stream",
+        filename="emails.db",
+        headers={
+            "Content-Length": str(file_size)
+        }
     )
 
 
