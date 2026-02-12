@@ -1563,7 +1563,7 @@ def ensure_sheet_has_header(service, spreadsheet_id: str):
         values = result.get('values', [])
         
         # If first row is empty, add header
-        if not values or not values[0]:
+        if not values:
             print("[Sheets] Sheet is empty, adding header row")
             
             # Define header columns
@@ -1647,16 +1647,32 @@ def append_row_to_sheet(service, spreadsheet_id: str, row_data: Dict[str, any], 
 
         max_col_index = max(column_map.values())
         row_array = [''] * (max_col_index + 1)
+        id_col_index = column_map.get('ID')
+        if id_col_index is None:
+            raise ValueError("ID column not found in column_map")
+        
+        col_letter = chr(65 + id_col_index)
+        id_range = f'Sheet1!{col_letter}:{col_letter}'
+
+        id_col_data = service.spreadsheets().values().get(
+            spreadsheetId=spreadsheet_id,
+            range=id_range
+        ).execute().get('values', [])
+        
+        last_row = len(id_col_data)
+        target_row = last_row + 1
+
         for column_name, value in row_data.items():
             if column_name in column_map:
                 index = column_map[column_name]
                 row_array[index] = value
             else:
                 print(f"[Sheets] Warning: Column '{column_name}' not found in header")
+        
         body = {'values': [row_array]}
         result = service.spreadsheets().values().append(
             spreadsheetId=spreadsheet_id,
-            range='Sheet1!A1',
+            range=f'Sheet1!A{target_row}',
             valueInputOption='USER_ENTERED',
             insertDataOption='OVERWRITE',
             body=body
