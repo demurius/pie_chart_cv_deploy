@@ -31,10 +31,15 @@
    - Place your `credentials.json` (OAuth 2.0 client) in the project root.
 
 5. **Configure the Application**
-   - Edit `config.json`:
-     - Set your `user_id` (Gmail address to fetch emails for)
-     - Set `google_sheet_id` (ID of your Google Sheet)
-     - Set `gemini_api_key` (if using Gemini features)
+   - Copy `.env.example` to `.env`:
+     ```bash
+     cp .env.example .env
+     ```
+   - Edit `.env`:
+     - Set your `USER_ID` (Gmail address to fetch emails for)
+     - **Set `API_TOKEN`** (generate using `openssl rand -hex 32`)
+     - Set `GOOGLE_SHEET_ID` (ID of your Google Sheet)
+     - Set `GEMINI_API_KEY` (if using Gemini features)
      - Adjust other settings as needed
 
 ## Running the Script
@@ -51,22 +56,25 @@
 
 3. **Fetch Emails**
    - Fetch emails with the required subject and attachments:
-     ```
-     GET http://localhost:8080/fetch-emails
+     ```bash
+     curl -H "Authorization: Bearer your_api_token" \
+          "http://localhost:8080/fetch-emails"
      ```
    - This saves emails to the local database and attachments to the local folder.
 
 4. **Process Emails**
    - Extract MBTI and pie chart data from fetched emails:
-     ```
-     GET http://localhost:8080/process-emails
+     ```bash
+     curl -H "Authorization: Bearer your_api_token" \
+          "http://localhost:8080/process-emails"
      ```
    - Results are saved to the database.
 
 5. **Save Results to Google Sheets**
    - Overwrite the Google Sheet with all results:
-     ```
-     GET http://localhost:8080/mbti-results
+     ```bash
+     curl -H "Authorization: Bearer your_api_token" \
+          "http://localhost:8080/mbti-results"
      ```
     - Results are saved to Google Sheet.
 
@@ -75,8 +83,9 @@
 To automate fetching, processing, and syncing new results:
 
 1. **Call the Sync Endpoint**
-   ```
-   GET http://localhost:8080/sync-emails
+   ```bash
+   curl -H "Authorization: Bearer your_api_token" \
+        "http://localhost:8080/sync-emails"
    ```
    - This will:
      - Fetch new emails since the last processed date
