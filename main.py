@@ -1627,14 +1627,15 @@ def ensure_sheet_has_header(service, spreadsheet_id: str):
         return False
 
 
-def append_row_to_sheet(service, spreadsheet_id: str, row_data: Dict[str, any], existing_emails=None):
+def append_row_to_sheet(service, spreadsheet_id: str, row_data: Dict[str, any], existing_emails=None, column_map: Optional[Dict[str, int]] = None, last_row: Optional[int] = None):
     try:
-        # Ensure header exists
-        ensure_sheet_has_header(service, spreadsheet_id)
-        column_map = get_sheet_column_map(service, spreadsheet_id)
+        # Column map should be precomputed by caller for batch operations
+        if column_map is None:
+            ensure_sheet_has_header(service, spreadsheet_id)
+            column_map = get_sheet_column_map(service, spreadsheet_id)
         if not column_map:
             print("[Sheets] Warning: Could not get column mapping")
-            return False
+            return False, last_row
 
         email_col_index = column_map.get("Email")
         if email_col_index is not None and existing_emails is not None:            
@@ -1650,16 +1651,23 @@ def append_row_to_sheet(service, spreadsheet_id: str, row_data: Dict[str, any], 
         id_col_index = column_map.get('ID')
         if id_col_index is None:
             raise ValueError("ID column not found in column_map")
-        
-        col_letter = chr(65 + id_col_index)
-        id_range = f'Sheet1!{col_letter}:{col_letter}'
 
-        id_col_data = service.spreadsheets().values().get(
-            spreadsheetId=spreadsheet_id,
-            range=id_range
-        ).execute().get('values', [])
-        
-        last_row = len(id_col_data)
+        # Calculate last_row only once per batch when caller does not provide it
+        if last_row is None:
+            col_letter = ""
+            idx = id_col_index
+            while idx >= 0:
+                col_letter = chr(65 + (idx % 26)) + col_letter
+                idx = idx // 26 - 1
+            id_range = f'Sheet1!{col_letter}:{col_letter}'
+
+            id_col_data = service.spreadsheets().values().get(
+                spreadsheetId=spreadsheet_id,
+                range=id_range
+            ).execute().get('values', [])
+
+            last_row = len(id_col_data)
+
         target_row = last_row + 1
 
         for column_name, value in row_data.items():
@@ -1677,10 +1685,10 @@ def append_row_to_sheet(service, spreadsheet_id: str, row_data: Dict[str, any], 
             insertDataOption='OVERWRITE',
             body=body
         ).execute()
-        return True
+        return True, target_row
     except Exception as e:
         print(f"[Sheets] Error: {str(e)}")
-        return False
+        return False, last_row
 
 
 def overwrite_sheet_data(service, spreadsheet_id: str, rows_data: List[Dict[str, any]]):
@@ -1883,10 +1891,25 @@ async def sync_emails(
                         results_with_emails = unique_results
                         
                         existing_emails = None
+                        column_map = None
+                        sheet_last_row = None
                         try:
                             # Ensure header exists
                             ensure_sheet_has_header(sheets_service, spreadsheet_id)
                             column_map = get_sheet_column_map(sheets_service, spreadsheet_id)
+                            if column_map:
+                                id_col_index = column_map.get("ID")
+                                if id_col_index is not None:
+                                    id_col_letter = ""
+                                    idx = id_col_index
+                                    while idx >= 0:
+                                        id_col_letter = chr(65 + (idx % 26)) + id_col_letter
+                                        idx = idx // 26 - 1
+                                    id_result = sheets_service.spreadsheets().values().get(
+                                        spreadsheetId=spreadsheet_id,
+                                        range=f"Sheet1!{id_col_letter}:{id_col_letter}",
+                                    ).execute()
+                                    sheet_last_row = len(id_result.get("values", []))
                             if column_map:                            
                                 email_col_index = column_map.get("Email")
                                 if email_col_index is not None:
@@ -1910,8 +1933,20 @@ async def sync_emails(
                             row_data = format_result_for_sheet(result, email)
                             
                             # Append row to sheet
-                            success = append_row_to_sheet(sheets_service, spreadsheet_id, row_data, existing_emails)
-                            if success:
+                            success = append_row_to_sheet(
+                                sheets_service,
+                                spreadsheet_id,
+                                row_data,
+                                existing_emails,
+                                column_map,
+                                sheet_last_row,
+                            )
+                            if isinstance(success, tuple):
+                                was_appended, sheet_last_row = success
+                            else:
+                                was_appended = bool(success)
+
+                            if was_appended:
                                 synced_to_sheet += 1
                         
                         print(f"[SyncProcess] Successfully synced {synced_to_sheet} rows to Google Sheet")
