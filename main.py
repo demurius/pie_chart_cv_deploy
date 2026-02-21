@@ -1830,162 +1830,127 @@ async def sync_emails(
             }
         
         print(f"[SyncProcess] Fetch completed: {fetch_result['saved_count']} new emails")
-        
-        # Step 2: Process the newly fetched emails (only for this user)
-        synced_to_sheet = 0
+
+        # Step 2: Process newly fetched emails first
+        process_result = {
+            "total_processed": 0,
+            "successful": 0,
+            "failed": 0,
+            "results": []
+        }
         if fetch_result["saved_count"] > 0:
             print(f"[SyncProcess] Step 2: Processing {fetch_result['saved_count']} emails...")
             process_result = await process_emails(
                 user_id=user_id,
                 batch_size=fetch_result["saved_count"]
             )
-            
-            # Step 3: Sync results to Google Sheet if spreadsheet_id is provided
-            if spreadsheet_id and process_result.get('successful', 0) > 0:
-                print(f"[SyncProcess] Step 3: Syncing {process_result.get('successful', 0)} results to Google Sheet...")
-                
-                try:
-                    # Get user credentials for Google Sheets API
-                    creds_data = get_user_credentials(user_id)
-                    if not creds_data:
-                        print(f"[SyncProcess] Warning: No credentials found for user {user_id}, skipping sheet sync")
-                    else:
-                        # Build credentials
-                        credentials = Credentials(
-                            token=creds_data["token"],
-                            refresh_token=creds_data.get("refresh_token"),
-                            token_uri=creds_data["token_uri"],
-                            client_id=creds_data["client_id"],
-                            client_secret=creds_data["client_secret"],
-                            scopes=creds_data["scopes"],
-                        )
-                        
-                        # Build Google Sheets service
-                        sheets_service = build('sheets', 'v4', credentials=credentials)
-                        
-                        # Get the newly processed results (only successful ones)
-                        results_to_sync = [r for r in process_result.get('results', []) if r.get('success') == 'success']
-                        
-                        # Build list of (result, email, date) tuples for sorting
-                        results_with_emails = []
-                        for result in results_to_sync:
-                            email = get_email_details_by_message_id(result['message_id'])
-                            if email:
-                                email_date = email.get('date')
-                                results_with_emails.append((result, email, email_date))
-                            else:
-                                print(f"[SyncProcess] Warning: Could not find email for message_id {result['message_id']}")
-                        
-                        # Sort by email date (ascending - oldest first)
-                        results_with_emails.sort(key=lambda x: x[2] if x[2] else datetime.min.replace(tzinfo=timezone.utc))
-                        
-                        # Filter out duplicate emails by sender_email, keeping only the first (oldest) in chronological order
-                        unique_results = []
-                        seen_emails = set()
-                        for result, email, email_date in results_with_emails:
-                            sender_email = (email.get('sender_email') if isinstance(email, dict) else getattr(email, 'sender_email', None))
-                            email_key = sender_email.strip().lower() if sender_email else ''
-                            if email_key and email_key not in seen_emails:
-                                unique_results.append((result, email, email_date))
-                                seen_emails.add(email_key)
-                        results_with_emails = unique_results
-                        
-                        existing_emails = None
-                        column_map = None
-                        sheet_last_row = None
-                        try:
-                            # Ensure header exists
-                            ensure_sheet_has_header(sheets_service, spreadsheet_id)
-                            column_map = get_sheet_column_map(sheets_service, spreadsheet_id)
-                            if column_map:
-                                id_col_index = column_map.get("ID")
-                                if id_col_index is not None:
-                                    id_col_letter = ""
-                                    idx = id_col_index
-                                    while idx >= 0:
-                                        id_col_letter = chr(65 + (idx % 26)) + id_col_letter
-                                        idx = idx // 26 - 1
-                                    id_result = sheets_service.spreadsheets().values().get(
-                                        spreadsheetId=spreadsheet_id,
-                                        range=f"Sheet1!{id_col_letter}:{id_col_letter}",
-                                    ).execute()
-                                    sheet_last_row = len(id_result.get("values", []))
-                            if column_map:                            
-                                email_col_index = column_map.get("Email")
-                                if email_col_index is not None:
-                                    col_letter = ""
-                                    idx = email_col_index
-                                    while idx >= 0:
-                                        col_letter = chr(65 + (idx % 26)) + col_letter
-                                        idx = idx // 26 - 1
-                                    result = sheets_service.spreadsheets().values().get(
-                                        spreadsheetId=spreadsheet_id,
-                                        range=f"Sheet1!{col_letter}2:{col_letter}",
-                                    ).execute()
-                                    existing_emails = set(row[0].strip().lower() for row in result.get("values", []) if row and row[0])
-                        except Exception as e:
-                            print(f"[Sheets] Error: {str(e)}")
-    
-                        
-                        # Insert rows in sorted order
-                        for result, email, email_date in results_with_emails:
-                            # Format row data using helper function
-                            row_data = format_result_for_sheet(result, email)
-                            
-                            # Append row to sheet
-                            success = append_row_to_sheet(
-                                sheets_service,
-                                spreadsheet_id,
-                                row_data,
-                                existing_emails,
-                                column_map,
-                                sheet_last_row,
-                            )
-                            if isinstance(success, tuple):
-                                was_appended, sheet_last_row = success
-                            else:
-                                was_appended = bool(success)
 
-                            if was_appended:
-                                synced_to_sheet += 1
-                        
-                        print(f"[SyncProcess] Successfully synced {synced_to_sheet} rows to Google Sheet")
-                        
-                except Exception as sheet_error:
-                    print(f"[SyncProcess] Error syncing to Google Sheet: {str(sheet_error)}")
-                    traceback.print_exc()
-                    # Don't fail the entire operation if sheet sync fails
-            
-            return {
-                "status": "success",
-                "message": f"Synced {fetch_result['saved_count']} new emails and processed {process_result.get('total_processed', 0)}",
-                "fetch_result": {
-                    "total_found": fetch_result["total_found"],
-                    "saved_count": fetch_result["saved_count"],
-                },
-                "process_result": {
-                    "total_processed": process_result.get("total_processed", 0),
-                    "successful": process_result.get("successful", 0),
-                    "failed": process_result.get("failed", 0)
-                },
-                "sheet_sync": {
-                    "synced_count": synced_to_sheet
-                } if spreadsheet_id else None
-            }
-        else:
-            return {
-                "status": "success",
-                "message": "No new emails to process",
-                "fetch_result": {
-                    "total_found": fetch_result["total_found"],
-                    "saved_count": fetch_result["saved_count"]
-                },
-                "process_result": {
-                    "total_processed": 0,
-                    "successful": 0,
-                    "failed": 0
-                }
-            }
+        # Step 3: Sync to Google Sheet by appending all rows not yet present in sheet
+        synced_to_sheet = 0
+        if spreadsheet_id:
+            print("[SyncProcess] Step 3: Syncing all unsynced results to Google Sheet...")
+            try:
+                # Get user credentials for Google Sheets API
+                creds_data = get_user_credentials(user_id)
+                if not creds_data:
+                    print(f"[SyncProcess] Warning: No credentials found for user {user_id}, skipping sheet sync")
+                else:
+                    # Build credentials
+                    credentials = Credentials(
+                        token=creds_data["token"],
+                        refresh_token=creds_data.get("refresh_token"),
+                        token_uri=creds_data["token_uri"],
+                        client_id=creds_data["client_id"],
+                        client_secret=creds_data["client_secret"],
+                        scopes=creds_data["scopes"],
+                    )
+
+                    # Build Google Sheets service
+                    sheets_service = build('sheets', 'v4', credentials=credentials)
+
+                    # Read existing IDs in sheet so we only append missing rows
+                    existing_sheet_ids = set()
+                    column_map = None
+                    sheet_last_row = None
+                    ensure_sheet_has_header(sheets_service, spreadsheet_id)
+                    column_map = get_sheet_column_map(sheets_service, spreadsheet_id)
+                    if column_map:
+                        id_col_index = column_map.get("ID")
+                        if id_col_index is not None:
+                            id_col_letter = ""
+                            idx = id_col_index
+                            while idx >= 0:
+                                id_col_letter = chr(65 + (idx % 26)) + id_col_letter
+                                idx = idx // 26 - 1
+                            id_result = sheets_service.spreadsheets().values().get(
+                                spreadsheetId=spreadsheet_id,
+                                range=f"Sheet1!{id_col_letter}:{id_col_letter}",
+                            ).execute()
+                            id_values = id_result.get("values", [])
+                            sheet_last_row = len(id_values)
+                            existing_sheet_ids = {
+                                row[0].strip().lower()
+                                for row in id_values[1:]
+                                if row and row[0]
+                            }
+
+                    # Get all processed results for this user (already deduped by sender in DB helper)
+                    all_results = get_mbti_results(user_id=user_id)
+
+                    # Build list of rows to sync, sorted oldest first
+                    rows_to_sync = []
+                    for item in all_results:
+                        if hasattr(item, '__len__') and len(item) == 2:
+                            mbti_result, email = item[0], item[1]
+                            message_id = getattr(email, 'message_id', None) or getattr(mbti_result, 'message_id', None)
+                            message_key = str(message_id).strip().lower() if message_id else ''
+                            if not message_key or message_key in existing_sheet_ids:
+                                continue
+                            email_date = getattr(email, 'date', None)
+                            rows_to_sync.append((mbti_result, email, email_date, message_key))
+
+                    rows_to_sync.sort(key=lambda x: x[2] if x[2] else datetime.min.replace(tzinfo=timezone.utc))
+
+                    for mbti_result, email, _, message_key in rows_to_sync:
+                        row_data = format_result_for_sheet(mbti_result, email)
+                        was_appended, sheet_last_row = append_row_to_sheet(
+                            sheets_service,
+                            spreadsheet_id,
+                            row_data,
+                            None,
+                            column_map,
+                            sheet_last_row,
+                        )
+                        if was_appended:
+                            synced_to_sheet += 1
+                            existing_sheet_ids.add(message_key)
+
+                    if synced_to_sheet > 0:
+                        print(f"[SyncProcess] Successfully synced {synced_to_sheet} missing row(s) to Google Sheet")
+                    else:
+                        print("[SyncProcess] No missing rows to sync to Google Sheet")
+
+            except Exception as sheet_error:
+                print(f"[SyncProcess] Error syncing to Google Sheet: {str(sheet_error)}")
+                traceback.print_exc()
+                # Don't fail the entire operation if sheet sync fails
+
+        return {
+            "status": "success",
+            "message": f"Synced {fetch_result['saved_count']} new emails, processed {process_result.get('total_processed', 0)}, and added {synced_to_sheet} missing sheet rows",
+            "fetch_result": {
+                "total_found": fetch_result["total_found"],
+                "saved_count": fetch_result["saved_count"],
+            },
+            "process_result": {
+                "total_processed": process_result.get("total_processed", 0),
+                "successful": process_result.get("successful", 0),
+                "failed": process_result.get("failed", 0)
+            },
+            "sheet_sync": {
+                "synced_count": synced_to_sheet
+            } if spreadsheet_id else None
+        }
     
     except Exception as e:
         print(f"[SyncProcess] Error: {str(e)}")
