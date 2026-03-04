@@ -1492,6 +1492,7 @@ def format_result_for_sheet(result_data: Dict, email_data: Dict) -> Dict[str, st
         'Role': role,
         'Date': date_str,
         'Link to Email': f'=HYPERLINK("{gmail_url}", "Link")' if gmail_url else '',
+        'Email ID': message_id or '',
         '% Cert': cert_field,
         'MBTI': mbti_type,
         'Ennegram': ennegram_field,
@@ -1567,7 +1568,7 @@ def ensure_sheet_has_header(service, spreadsheet_id: str):
             print("[Sheets] Sheet is empty, adding header row")
             
             # Define header columns
-            headers = ['ID', 'Email', 'Name', 'Subject', 'Role', 'Date', 'Link to Email', '% Cert', 'MBTI', 'Ennegram', 'Tritype', 'Tritype (no 8)']
+            headers = ['ID', 'Email', 'Name', 'Subject', 'Role', 'Date', 'Link to Email', 'Email ID', '% Cert', 'MBTI', 'Ennegram', 'Tritype', 'Tritype (no 8)']
             
             # Add header row
             body = {'values': [headers]}
@@ -2126,7 +2127,7 @@ async def get_results(
                     writer = csv.writer(csvfile)
                     
                     # Write header with requested columns
-                    writer.writerow(['ID', 'Email', 'Name', 'Subject', 'Role', 'Date', 'Link to Email', '% Cert', 'MBTI', 'Ennegram', 'Tritype', 'Tritype (no 8)'])
+                    writer.writerow(['ID', 'Email', 'Name', 'Subject', 'Role', 'Date', 'Link to Email', 'Email ID', '% Cert', 'MBTI', 'Ennegram', 'Tritype', 'Tritype (no 8)'])
                     
                     # Write data rows
                     for i, mbti_result in enumerate(mbti_results):
@@ -2140,6 +2141,9 @@ async def get_results(
                                 link_to_email = permalink
                             elif email.message_id:
                                 link_to_email = f"https://mail.google.com/mail/u/0/#inbox/{email.message_id}"
+                        
+                        # Get raw email ID
+                        email_id_raw = email.message_id if email else (getattr(mbti_result, 'message_id', '') or '')
                         
                         # Format % Cert field
                         cert_field = ""
@@ -2171,6 +2175,7 @@ async def get_results(
                             role,
                             email.date.strftime('%Y-%m-%d') if email and email.date else '',  # Date
                             link_to_email,  # Link to Email - using built permalink
+                            email_id_raw,  # Email ID - raw message ID
                             cert_field,  # % Cert
                             mbti_result.mbti_type or '',  # MBTI
                             ennegram_field,  # Ennegram
@@ -2232,7 +2237,7 @@ async def get_results(
             csv_data = []
             
             # Add header row (same as saved CSV)
-            header = ['ID', 'Email', 'Name', 'Subject', 'Role', 'Date', 'Link to Email', '% Cert', 'MBTI', 'Ennegram', 'Tritype', 'Tritype (no 8)']
+            header = ['ID', 'Email', 'Name', 'Subject', 'Role', 'Date', 'Link to Email', 'Email ID', '% Cert', 'MBTI', 'Ennegram', 'Tritype', 'Tritype (no 8)']
             csv_data.append(header)
             
             # Add data rows
@@ -2247,6 +2252,9 @@ async def get_results(
                         link_to_email = permalink
                     elif email.message_id:
                         link_to_email = f"https://mail.google.com/mail/u/0/#inbox/{email.message_id}"
+                
+                # Get raw email ID
+                email_id_raw = email.message_id if email else (getattr(mbti_result, 'message_id', '') or '')
                 
                 # Format % Cert field
                 cert_field = ""
@@ -2278,6 +2286,7 @@ async def get_results(
                     role,  # Role
                     email.date.strftime('%Y-%m-%d') if email and email.date else '',  # Date
                     link_to_email,  # Link to Email
+                    email_id_raw,  # Email ID - raw message ID
                     cert_field,  # % Cert
                     mbti_result.mbti_type or '',  # MBTI
                     ennegram_field,  # Ennegram
@@ -2310,6 +2319,9 @@ async def get_results(
                     elif email.message_id:
                         link_to_email = f"https://mail.google.com/mail/u/0/#inbox/{email.message_id}"
                 
+                # Get raw email ID
+                email_id_raw = email.message_id if email else (getattr(mbti_result, 'message_id', '') or '')
+                
                 # Format % Cert field (same as saved CSV)
                 cert_field = ""
                 if all(getattr(mbti_result, attr, None) is not None for attr in ['energy', 'mind', 'nature', 'tactics', 'identity']):
@@ -2341,6 +2353,7 @@ async def get_results(
                     'Role': role,
                     'Date': email.date.strftime('%Y-%m-%d') if email and email.date else '',
                     'Link to Email': link_to_email,
+                    'Email ID': email_id_raw,
                     '% Cert': cert_field,
                     'MBTI': mbti_result.mbti_type or '',
                     'Ennegram': ennegram_field,
@@ -2382,4 +2395,3 @@ if __name__ == "__main__":
         except Exception:
             print(f"[Config] Invalid port in config, using default 8080")
     uvicorn.run(app, host="0.0.0.0", port=port)
-    
